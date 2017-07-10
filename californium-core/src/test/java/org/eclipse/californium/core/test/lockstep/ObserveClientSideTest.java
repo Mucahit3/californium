@@ -366,14 +366,34 @@ public class ObserveClientSideTest {
 		notifpayload = generateRandomPayload(8);
 		server.sendResponse(CON, CONTENT).loadToken("OBS_TOK").observe(3).mid(++mid_notif)
 				.payload(notifpayload).go();
+		server.expectEmpty(ACK, mid_notif).go();
 		response = notificationListener.waitForResponse(1000);
 		assertResponseContainsExpectedPayload(response, notifpayload);
 
 		// Send new notif without block
 		server.sendResponse(CON, CONTENT).loadToken("OBS_TOK").observe(4).mid(++mid_notif).payload(notifpayload).go();
+		server.expectEmpty(ACK, mid_notif).go();
 		response = notificationListener.waitForResponse(1000);
 		assertResponseContainsExpectedPayload(response, notifpayload);
 
+		
+		// Now try to send a GET on the same resource using block2.
+		Request getRequest = createRequest(GET, path, server);
+		client.sendRequest(getRequest);
+		
+		// Expect get request
+		server.expectRequest(CON, GET, path).storeMID("GET_REQ").storeToken("GET_TOK").go();
+		server.sendEmpty(ACK).loadMID("GET_REQ").go();
+		
+		// Send response with block2
+		server.sendResponse(CON, CONTENT).loadToken("GET_TOK").mid(++mid_block).block2(0, true, 16)
+				.payload(respPayload.substring(0, 16)).go();
+		
+		// check we receive ACK and next block request.
+		server.expectEmpty(ACK, mid_block).go();
+		server.expectRequest(CON, GET, path).storeMID("BLOCK_TOK").storeToken("SECOND_BLOCK").block2(1, false, 16)
+						.go();
+		
 		printServerLog(clientInterceptor);
 	}
 }
