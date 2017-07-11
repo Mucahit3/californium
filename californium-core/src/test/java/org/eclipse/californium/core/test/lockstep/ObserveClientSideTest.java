@@ -396,4 +396,98 @@ public class ObserveClientSideTest {
 		
 		printServerLog(clientInterceptor);
 	}
+
+	/**
+	 * Verifies, that a GET is processed, when a notify is received in "transparent" blockwise mode.
+	 * 
+	 * @throws Exception
+	 */
+	@Test
+	public void testBlockwiseObserveAndGet() throws Exception {
+		System.out.println("Blockwise Observe:");
+		// observer request response will be sent using blockwise
+		respPayload = generateRandomPayload(32);
+		String path = "test";
+
+		Request request = createRequest(GET, path, server);
+		request.setObserve();
+		SynchronousNotificationListener notificationListener = new SynchronousNotificationListener(request);
+		client.addNotificationListener(notificationListener);
+
+		// Send observe request
+		client.sendRequest(request);
+
+		// Expect observe request
+		server.expectRequest(CON, GET, path).storeMID("OBS_MID").storeToken("OBS_TOK").go();
+		// Send empty ACK (for separate response) 
+		server.sendEmpty(ACK).loadMID("OBS_MID").go();
+		// Send blockwise response
+		int mid_block = 111;
+		server.sendResponse(CON, CONTENT).loadToken("OBS_TOK").observe(1).mid(mid_block).block2(0, true, 16)
+				.payload(respPayload.substring(0, 16)).go();
+
+		server.startMultiExpectation();
+		// Expect ACKs
+		server.expectEmpty(ACK, mid_block).go();
+		// Expect next block request
+		server.expectRequest(CON, GET, path).storeMID("BLOCK_MID").storeToken("BLOCK_TOK").block2(1, false, 16)
+				.go();
+		server.goMultiExpectation();
+		
+		// Send empty ACK (for separate response) 
+		server.sendEmpty(ACK).loadMID("BLOCK_MID").go();
+		
+		// Send next (last) block response
+		server.sendResponse(CON, CONTENT).loadToken("BLOCK_TOK").mid(++mid_block).block2(1, false, 16)
+		.payload(respPayload.substring(16, 32)).go();
+		
+		// Expect ACK for block response
+		server.expectEmpty(ACK, mid_block).go();
+
+		// Check that we get the response
+		Response response = request.waitForResponse();
+		assertResponseContainsExpectedPayload(response, respPayload);
+		
+		// Send new notify
+		respPayload = generateRandomPayload(64);
+
+		// Send new notify response
+		server.sendResponse(CON, CONTENT).loadToken("OBS_TOK").observe(2).mid(++mid_block).block2(0, true, 16)
+			.payload(respPayload.substring(0, 16)).go();
+		
+		server.startMultiExpectation();
+		// Expect ACKs
+		server.expectEmpty(ACK, mid_block).go();
+		// Expect next block request
+		server.expectRequest(CON, GET, path).storeMID("BLOCK_MID").storeToken("BLOCK_TOK").block2(1, false, 16)
+		.go();
+		server.goMultiExpectation();
+		
+		// Send ACK
+		server.sendEmpty(ACK).loadMID("BLOCK_MID").go();
+
+		// stale blockwise notify
+		
+		// Now try to send a GET on the same resource using block2.
+		Request getRequest = createRequest(GET, path, server);
+		client.sendRequest(getRequest);
+		
+		// Expect get request
+		server.expectRequest(CON, GET, path).storeMID("GET_MID").storeToken("GET_TOK").go();
+		// Send empty ACK (for separate response) 
+		server.sendEmpty(ACK).loadMID("GET_MID").go();
+		
+		// Send response with block2
+		server.sendResponse(CON, CONTENT).loadToken("GET_TOK").mid(++mid_block).block2(0, true, 16)
+				.payload(respPayload.substring(0, 16)).go();
+		
+		// check we receive ACK and next block request.
+		server.startMultiExpectation();
+		server.expectEmpty(ACK, mid_block).go();
+		server.expectRequest(CON, GET, path).storeMID("BLOCK_MID").storeToken("BLOCK_TOK").block2(1, false, 16)
+						.go();
+		server.goMultiExpectation();
+		
+		printServerLog(clientInterceptor);
+	}
 }
