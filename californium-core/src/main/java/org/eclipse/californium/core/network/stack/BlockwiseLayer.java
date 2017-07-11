@@ -27,6 +27,8 @@
  *                                                    block1wise, when the generated
  *                                                    token was copied too late 
  *                                                    (after sending). 
+ *    Achim Kraus (Bosch Software Innovations GmbH) - cancel a pending blockwise notify,
+ *                                                    if a new request is send.
  ******************************************************************************/
 package org.eclipse.californium.core.network.stack;
 
@@ -184,11 +186,19 @@ public class BlockwiseLayer extends AbstractLayer {
 				// a transparent blockwise transfer.
 				LOGGER.fine("outbound request contains block2 option, creating random-access blockwise status");
 				addRandomAccessBlock2Status(exchange, request);
-
-			} else if (requiresBlockwise(request)) {
-				// This must be a large POST or PUT request
-				requestToSend = startBlockwiseUpload(exchange, request);
-
+			} else {
+				// cleanup pending block2 transfer of notify
+				// pending request should be canceled before a new request
+				KeyUri key = getKey(exchange, request);
+				Block2BlockwiseStatus status = getBlock2Status(key);
+				if (status != null && status.isNotification()) {
+					clearBlock2Status(key);
+				}
+				
+				if (requiresBlockwise(request)) {
+					// This must be a large POST or PUT request
+					requestToSend = startBlockwiseUpload(exchange, request);
+				}
 			}
 		}
 
